@@ -234,6 +234,26 @@ def _show_success_popup(mesh_name, export_path):
 # ---------------------------------------------------------------------------
 # Pillow installer
 # ---------------------------------------------------------------------------
+def _cleanup_pip_artifacts(lib_path):
+    """Remove pip installer junk from lib_path — .dist-info, bin/, __pycache__, etc."""
+    import shutil
+    removed = []
+    for item in os.listdir(lib_path):
+        full = os.path.join(lib_path, item)
+        # Remove pip metadata folders and installer noise
+        if (item.endswith('.dist-info') or
+                item.endswith('.data') or
+                item in ('bin', 'scripts', 'Scripts', '__pycache__')):
+            try:
+                shutil.rmtree(full) if os.path.isdir(full) else os.remove(full)
+                removed.append(item)
+            except Exception as e:
+                print(f"[GLB] Cleanup warning — could not remove {item}: {e}")
+    if removed:
+        print(f"[GLB] Cleaned up installer artifacts: {', '.join(removed)}")
+    else:
+        print("[GLB] Nothing to clean up.")
+
 def ensure_libraries(lib_path):
     if lib_path and lib_path not in sys.path:
         sys.path.insert(0, lib_path)
@@ -270,6 +290,8 @@ def ensure_libraries(lib_path):
                 print("[GLB] Pillow installed successfully!")
                 if lib_path not in sys.path: sys.path.insert(0, lib_path)
                 import importlib; importlib.invalidate_caches()
+                # Clean up pip installer artifacts — keep only importable packages
+                _cleanup_pip_artifacts(lib_path)
                 return True
             else:
                 print(f"[GLB] Pillow install FAILED:\n{result.stderr}"); return False
