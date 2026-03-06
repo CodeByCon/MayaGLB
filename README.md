@@ -13,7 +13,7 @@ Made because Maya doesn't have a built-in GLB exporter, paid plugins exist but c
 3. Press enter.
 
 ```mel
-python("import urllib.request as r; exec(compile(r.urlopen('https://raw.githubusercontent.com/CodeByCon/MayaGLB/main/glb_exporter_v1.py').read(),'<glb>','exec'))");
+python("import urllib.request as r; exec(compile(r.urlopen('https://raw.githubusercontent.com/CodeByCon/MayaGLB/main/glb_exporter.py').read(),'<glb>','exec'))");
 ```
 
 Runs the latest version straight from GitHub every time — no files to manage. Save it as a shelf button for one-click access.
