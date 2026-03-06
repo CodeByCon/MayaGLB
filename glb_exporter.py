@@ -10,7 +10,7 @@ import os, struct, sys, subprocess, io, json, math
 #  - ORM: Make ORM texture (pack O/R/M → single PNG)
 #         OR Keep Separate (embed each + write Blender node-wiring script)
 #  - Non-manifold detection → warn + confirm dialog before fixing
-#  - Maya (1.0) / Blender (0.01) / UE (0.01) scale presets
+#  - Maya (1.0) / Blender (0.01) / UE (100) scale presets
 #  - Hand-written GLB 2.0 packer — no external dependencies except Pillow
 # =============================================================================
 
@@ -102,8 +102,8 @@ else:
 # Settings  save / load
 # ---------------------------------------------------------------------------
 _SETTINGS_DEFAULTS = {
-    "yup":          True,
-    "unit_scale":   0.01,
+    "yup":          False,
+    "unit_scale":   1.0,
     "export_uvs":   True,
     "export_norms": True,
     "flip_norms":   False,
@@ -496,31 +496,42 @@ def get_shader_data_for_sg(sg_name):
 # ---------------------------------------------------------------------------
 # Per-face-material geometry extraction
 # ---------------------------------------------------------------------------
-def extract_geometry_by_material(mesh_transform, unit_scale=0.01):
+def extract_geometry_by_material(mesh_transform, unit_scale=1.0):
     shape = (cmds.listRelatives(mesh_transform, shapes=True, type='mesh') or [None])[0]
     if not shape: return []
-    sgs = list(dict.fromkeys(cmds.listConnections(shape, type='shadingEngine') or []))
-    if not sgs: return []
-
-    face_to_sg = {}
-    for sg in sgs:
-        for member in (cmds.sets(sg, q=True) or []):
-            if shape in member and '.f[' in member:
-                fp = member.split('.f[')[1].rstrip(']')
-                if ':' in fp:
-                    s, e = fp.split(':')
-                    for fi in range(int(s), int(e)+1): face_to_sg[fi] = sg
-                else:
-                    face_to_sg[int(fp)] = sg
 
     sel_list = om.MSelectionList()
     sel_list.add(mesh_transform)
-    m_fn = om.MFnMesh(sel_list.getDagPath(0))
+    dag_path = sel_list.getDagPath(0)
+    m_fn     = om.MFnMesh(dag_path)
 
-    if not face_to_sg:
-        for fi in range(m_fn.numPolygons): face_to_sg[fi] = sgs[0]
+    # --- Build face_to_sg using OpenMaya shading engine iteration ---
+    # getConnectedShaders returns per-face shader index — no string matching needed
+    face_to_sg = {}
+    sg_order   = []
+
+    shaders_mobjs, face_shader_idx = m_fn.getConnectedShaders(0)
+
+    sg_names = []
+    for mob in shaders_mobjs:
+        fn = om.MFnDependencyNode(mob)
+        name = fn.name()
+        sg_names.append(name)
+        if name not in sg_order:
+            sg_order.append(name)
+
+    for fi, si in enumerate(face_shader_idx):
+        sg = sg_names[si] if 0 <= si < len(sg_names) else (sg_names[0] if sg_names else None)
+        if sg:
+            face_to_sg[fi] = sg
+
+    sgs = sg_order if sg_order else (cmds.listConnections(shape, type='shadingEngine') or [])
+    if not sgs: return []
+
+    # Fallback: any unassigned faces go to first SG
     for fi in range(m_fn.numPolygons):
-        if fi not in face_to_sg: face_to_sg[fi] = sgs[0]
+        if fi not in face_to_sg:
+            face_to_sg[fi] = sgs[0]
 
     raw_pts          = m_fn.getPoints(om.MSpace.kWorld)
     raw_nrms         = m_fn.getNormals(om.MSpace.kWorld)
@@ -670,7 +681,7 @@ def build_glb(mesh_list, opts=None):
     if opts is None: opts = {}
     orm_mode        = opts.get('orm_mode',        'make_orm')
     yup             = opts.get('yup',             True)
-    unit_scale      = opts.get('unit_scale',      0.01)
+    unit_scale      = opts.get('unit_scale',      1.0)
     export_uvs      = opts.get('export_uvs',      True)
     export_norms    = opts.get('export_norms',    True)
     flip_norms      = opts.get('flip_norms',      False)
@@ -1060,20 +1071,10 @@ class UE_Blender_Final_Exporter:
 
         # ── Transform ──────────────────────────────────────
         _sub("Transform")
-        self.yup        = cmds.checkBoxGrp(l="+Y Up (Z-up → Y-up):", v1=True,  cw2=CW,
-                                            ann="Rotate the mesh so Maya's Z-up axis becomes Y-up in the GLB.\nRequired for correct orientation in Blender and Unreal Engine.")
-        self.unit_scale = cmds.floatFieldGrp(l="Scale multiplier:", nf=1, v1=0.01, cw2=[150,80],
-                                              ann="Multiply all vertex positions by this value.\nMaya works in centimetres — use 0.01 to export in metres (Blender/UE standard).")
-        cmds.rowLayout(nc=4, cw4=[100,104,108,100])
-        cmds.text(l="  Presets:",
-                  ann="Quick-set the scale multiplier for common target applications.")
-        cmds.button(l="Maya (1.0)",     c=lambda *_: cmds.floatFieldGrp(self.unit_scale,e=True,v1=1.0),
-                    ann="Scale 1:1 — use when the receiving app expects Maya's centimetre units.")
-        cmds.button(l="Blender (0.01)", c=lambda *_: cmds.floatFieldGrp(self.unit_scale,e=True,v1=0.01),
-                    ann="Converts Maya centimetres to metres for Blender's default unit system.")
-        cmds.button(l="UE (0.01)",      c=lambda *_: cmds.floatFieldGrp(self.unit_scale,e=True,v1=0.01),
-                    ann="Unreal Engine expects 1 unit = 1 cm internally, but GLB imports as metres.\nUse 0.01 to keep real-world scale.")
-        cmds.setParent('..')
+        self.yup        = cmds.checkBoxGrp(l="+Y Up (Z-up → Y-up):", v1=False, cw2=CW,
+                                            ann="Rotate the mesh so Maya's Z-up axis becomes Y-up in the GLB.\nEnable if the model appears on its side in Blender or Unreal Engine.")
+        self.unit_scale = cmds.floatFieldGrp(l="Scale multiplier:", nf=1, v1=1.0, cw2=[150,80],
+                                              ann="Multiply all vertex positions by this value.\n1.0 = no change. Use 0.01 to convert Maya cm to metres for Blender/UE.")
         cmds.rowLayout(nc=2, cw2=[100,220])
         cmds.text(l="")
         cmds.button(l="Check Selection Scale", c=self._check_scale,
@@ -1464,6 +1465,14 @@ class UE_Blender_Final_Exporter:
             self._set_status(msg, (0.14,0.38,0.18))
             print(f"[GLB] {msg}")
             save_settings(self._collect_settings())
+            # Reset button after 3 seconds
+            import threading
+            def _reset_btn():
+                try:
+                    cmds.evalDeferred(lambda: cmds.button(self.export_btn, e=True,
+                        bgc=(0.18,0.42,0.78), l="EXPORT GLB"))
+                except: pass
+            threading.Timer(3.0, _reset_btn).start()
 
         except Exception as e:
             import traceback; traceback.print_exc()
