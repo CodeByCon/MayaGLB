@@ -8,7 +8,7 @@ Made because Maya doesn't have a built-in GLB exporter, paid plugins exist but c
 
 ## Install
 
-1. Open Maya and go to the bottom middle of your screen where it says "MEL" and a text input box on the right.
+1. Open Maya 2026 and go to the bottom middle of your screen where it says "MEL" and a text input box on the right.
 2. Copy the code below and paste it in.
 3. Press enter.
 
