@@ -441,15 +441,23 @@ def get_shader_data_for_sg(sg_name):
             if fn:
                 data['color_path'] = cmds.getAttr(fn[0] + ".fileTextureName")
             else:
-                raw = cmds.getAttr(full)
-                if isinstance(raw, (list, tuple)) and len(raw) > 0:
-                    rgb = raw[0] if isinstance(raw[0], (list, tuple)) else raw
-                else:
-                    rgb = (1.0, 1.0, 1.0)
-                data['factor'] = [
-                    float(min(max(float(rgb[0]), 0.0), 1.0)),
-                    float(min(max(float(rgb[1]), 0.0), 1.0)),
-                    float(min(max(float(rgb[2]), 0.0), 1.0)), 1.0]
+                try:
+                    raw = cmds.getAttr(full)
+                    # getAttr returns [(r,g,b)] for colour attrs, or (r,g,b), or [[r,g,b]]
+                    if isinstance(raw, (list, tuple)):
+                        flat = raw[0] if isinstance(raw[0], (list, tuple)) else raw
+                        # ensure we have at least 3 values
+                        r = float(flat[0]) if len(flat) > 0 else 1.0
+                        g = float(flat[1]) if len(flat) > 1 else 1.0
+                        b = float(flat[2]) if len(flat) > 2 else 1.0
+                    else:
+                        r = g = b = 1.0
+                    data['factor'] = [
+                        min(max(r, 0.0), 1.0),
+                        min(max(g, 0.0), 1.0),
+                        min(max(b, 0.0), 1.0), 1.0]
+                except Exception as ce:
+                    print(f"[GLB] Could not read colour factor: {ce}")
             break
 
         # ── Normal map — handles aiNormalMap, bump2d, and direct file ───
@@ -527,7 +535,7 @@ def extract_geometry_by_material(mesh_transform, unit_scale=1.0):
     if not shape: return []
 
     sel_list = om.MSelectionList()
-    sel_list.add(mesh_transform)
+    sel_list.add(mesh_transform.split('|')[-1])
     dag_path = sel_list.getDagPath(0)
     m_fn     = om.MFnMesh(dag_path)
 
@@ -803,12 +811,19 @@ def build_glb(mesh_list, opts=None):
 
     for mesh_transform in mesh_list:
         print(f"\n[GLB] ── Processing: {mesh_transform}")
-        tmp = cmds.duplicate(mesh_transform)[0]
+        # duplicate returns a short name that may clash — rename immediately to a unique name
+        dup_result = cmds.duplicate(mesh_transform, returnRootsOnly=True)[0]
+        tmp = cmds.rename(dup_result, f"_GLB_tmp_{id(dup_result)}")
+        # Parent to world to avoid any transform inheritance issues
+        if cmds.listRelatives(tmp, parent=True):
+            tmp = cmds.parent(tmp, world=True)[0]
         if apply_trs:
             cmds.makeIdentity(tmp, apply=True, t=True, r=True, s=True)
         if merge_verts:
             cmds.polyMergeVertex(tmp, d=merge_thresh, constructionHistory=False)
         cmds.polyTriangulate(tmp)
+        # Re-resolve short name in case any operation changed the path
+        tmp = cmds.ls(tmp, long=False)[0]
         temps.append(tmp)
 
         prim_groups = extract_geometry_by_material(tmp, unit_scale=unit_scale)
