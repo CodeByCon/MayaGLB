@@ -32,7 +32,6 @@ Pillow (the only dependency) is installed automatically on first run to `DRIVE:/
 - ORM textures — pack O+R+M into one PNG, or keep separate with an auto-generated Blender node-wiring script
 - Skeleton export — joint hierarchy, inverse bind matrices, skin weights
 - Animation — bakes TRS keyframes over the playback range
-- Scale presets — Maya / Blender / UE with a live bounding-box checker
 - Non-manifold detection — warns and optionally auto-fixes before export
 - Vertex colours — exports `COLOR_0` from the active colour set
 - Persistent settings — saved to `DRIVE:/MayaGLB/Settings/exporter_settings.json`
