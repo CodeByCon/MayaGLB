@@ -21,7 +21,7 @@ Runs the latest version straight from GitHub every time — no files to manage. 
 Pillow (the only dependency) is installed automatically on first run to `DRIVE:/MayaGLB/PythonPlugins`. No admin rights required.
 
 ## Video Tutorial:
-<iframe width="2545" height="1142" src="https://www.youtube.com/embed/VMBnNUz1HIQ" title="FREE GLB EXPORT TOOL FOR MAYA 2026! [MayaGLB]" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+[![MayaGLB Tutorial](https://img.youtube.com/vi/VMBnNUz1HIQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=VMBnNUz1HIQ)
 
 ---
 
