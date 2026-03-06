@@ -56,4 +56,4 @@ Pillow (the only dependency) is installed automatically on first run to `DRIVE:/
 
 ## License
 
-MIT — free to use, modify, and distribute. Please don't sell it as a paid plugin. That's literally why this exists.
+ GPL V3 
