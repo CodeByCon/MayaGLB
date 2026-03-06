@@ -423,7 +423,6 @@ def write_blender_node_script(export_path, mat_name,
 def get_shader_data_for_sg(sg_name):
     data = {
         'color_path': None, 'normal_path': None,
-        'orm_path': None,
         'occlusion_path': None, 'roughness_path': None, 'metallic_path': None,
         'factor': [1.0, 1.0, 1.0, 1.0],
         'metallic_val': 0.0, 'roughness_val': 0.5,
@@ -434,6 +433,7 @@ def get_shader_data_for_sg(sg_name):
         shader = shader_conn[0]
         print(f"[GLB] Shader: '{shader}'  type={cmds.nodeType(shader)}")
 
+        # ── Base colour ──────────────────────────────────────────────────
         for attr in ["baseColor", "color", "diffuseColor", "base_color"]:
             if not cmds.attributeQuery(attr, n=shader, ex=True): continue
             full = shader + "." + attr
@@ -452,41 +452,67 @@ def get_shader_data_for_sg(sg_name):
                     float(min(max(float(rgb[2]), 0.0), 1.0)), 1.0]
             break
 
+        # ── Normal map — handles aiNormalMap, bump2d, and direct file ───
         for attr in ["normalCamera", "normalMap", "normal"]:
             if not cmds.attributeQuery(attr, n=shader, ex=True): continue
-            bump = cmds.listConnections(shader + "." + attr, type='bump2d') or []
-            if bump:
-                nf = cmds.listConnections(bump[0] + ".bumpValue", type='file') or []
-                if nf: data['normal_path'] = cmds.getAttr(nf[0] + ".fileTextureName"); break
-            direct = cmds.listConnections(shader + "." + attr, type='file') or []
-            if direct: data['normal_path'] = cmds.getAttr(direct[0] + ".fileTextureName"); break
+            # Walk all upstream connections, not just specific types
+            upstream = cmds.listConnections(shader + "." + attr, source=True, destination=False) or []
+            for node in upstream:
+                node_type = cmds.nodeType(node)
+                # aiNormalMap: texture connected to .input
+                if node_type == 'aiNormalMap':
+                    nf = cmds.listConnections(node + ".input", type='file') or []
+                    if nf:
+                        data['normal_path'] = cmds.getAttr(nf[0] + ".fileTextureName")
+                        print(f"[GLB] Normal via aiNormalMap: {data['normal_path']}")
+                        break
+                # Standard bump2d: texture connected to .bumpValue
+                elif node_type == 'bump2d':
+                    nf = cmds.listConnections(node + ".bumpValue", type='file') or []
+                    if nf:
+                        data['normal_path'] = cmds.getAttr(nf[0] + ".fileTextureName")
+                        print(f"[GLB] Normal via bump2d: {data['normal_path']}")
+                        break
+                # Direct file node
+                elif node_type == 'file':
+                    data['normal_path'] = cmds.getAttr(node + ".fileTextureName")
+                    print(f"[GLB] Normal direct file: {data['normal_path']}")
+                    break
+            if data['normal_path']:
+                break
 
-        for attr in ["specularRoughness","metalness","metallicRoughnessTexture","roughness","metallic","coatRoughness"]:
-            if not cmds.attributeQuery(attr, n=shader, ex=True): continue
-            of = cmds.listConnections(shader + "." + attr, type='file') or []
-            if of: data['orm_path'] = cmds.getAttr(of[0] + ".fileTextureName"); break
-
-        for attr in ["ambientOcclusion", "occlusion", "ao"]:
-            if not cmds.attributeQuery(attr, n=shader, ex=True): continue
-            f2 = cmds.listConnections(shader + "." + attr, type='file') or []
-            if f2: data['occlusion_path'] = cmds.getAttr(f2[0] + ".fileTextureName"); break
-
+        # ── Roughness ────────────────────────────────────────────────────
         for attr in ["specularRoughness", "roughness"]:
             if not cmds.attributeQuery(attr, n=shader, ex=True): continue
             f2 = cmds.listConnections(shader + "." + attr, type='file') or []
-            if f2: data['roughness_path'] = cmds.getAttr(f2[0] + ".fileTextureName"); break
+            if f2:
+                data['roughness_path'] = cmds.getAttr(f2[0] + ".fileTextureName")
+                print(f"[GLB] Roughness: {data['roughness_path']}")
+                break
+            else:
+                try: data['roughness_val'] = float(cmds.getAttr(shader + "." + attr))
+                except: pass
 
+        # ── Metallic ─────────────────────────────────────────────────────
         for attr in ["metalness", "metallic"]:
             if not cmds.attributeQuery(attr, n=shader, ex=True): continue
             f2 = cmds.listConnections(shader + "." + attr, type='file') or []
-            if f2: data['metallic_path'] = cmds.getAttr(f2[0] + ".fileTextureName"); break
+            if f2:
+                data['metallic_path'] = cmds.getAttr(f2[0] + ".fileTextureName")
+                print(f"[GLB] Metallic: {data['metallic_path']}")
+                break
+            else:
+                try: data['metallic_val'] = float(cmds.getAttr(shader + "." + attr))
+                except: pass
 
-        for attr, key in [("metalness","metallic_val"),("metallic","metallic_val"),
-                          ("specularRoughness","roughness_val"),("roughness","roughness_val")]:
-            if cmds.attributeQuery(attr, n=shader, ex=True):
-                if not (cmds.listConnections(shader+"."+attr, type='file') or []):
-                    try: data[key] = float(cmds.getAttr(shader+"."+attr))
-                    except: pass
+        # ── Occlusion ────────────────────────────────────────────────────
+        for attr in ["ambientOcclusion", "occlusion", "ao"]:
+            if not cmds.attributeQuery(attr, n=shader, ex=True): continue
+            f2 = cmds.listConnections(shader + "." + attr, type='file') or []
+            if f2:
+                data['occlusion_path'] = cmds.getAttr(f2[0] + ".fileTextureName")
+                print(f"[GLB] Occlusion: {data['occlusion_path']}")
+                break
 
     except Exception as e:
         import traceback
@@ -854,32 +880,17 @@ def build_glb(mesh_list, opts=None):
 
                 if export_imgs:
                     if orm_mode == 'make_orm':
-                        o = md['occlusion_path'] or md['orm_path']
-                        r = md['roughness_path'] or md['orm_path']
-                        m = md['metallic_path']  or md['orm_path']
+                        o = md['occlusion_path']
+                        r = md['roughness_path']
+                        m = md['metallic_path']
                         if any([o, r, m]):
                             orm_img = pack_orm_textures(o, r, m)
                             ck = f"ORM::{o}::{r}::{m}"
                             orm_tex = embed_pil(orm_img, cache_key=ck)
+                            print(f"[GLB] ORM packed — O:{o} R:{r} M:{m}")
+                        else:
+                            print(f"[GLB] ORM skipped — no O/R/M textures found on shader")
                     else:
-                        ao_tex    = embed_file(md['occlusion_path'])
-                        rough_tex = embed_file(md['roughness_path'])
-                        metal_tex = embed_file(md['metallic_path'])
-
-                        if not any([ao_tex, rough_tex, metal_tex]) and md['orm_path'] and \
-                                os.path.exists(md['orm_path']):
-                            packed = Image.open(md['orm_path']).convert('RGB')
-                            r_ch, g_ch, b_ch = packed.split()
-                            def _embed_channel(ch_img, key):
-                                buf = io.BytesIO()
-                                ch_img.save(buf, format="PNG")
-                                return embed_pil(Image.open(io.BytesIO(buf.getvalue())),
-                                                 cache_key=f"{md['orm_path']}::{key}")
-                            ao_tex    = _embed_channel(r_ch, 'R')
-                            rough_tex = _embed_channel(g_ch, 'G')
-                            metal_tex = _embed_channel(b_ch, 'B')
-                            print(f"[GLB] Split pre-packed ORM into separate R/G/B channels")
-
                         if export_path:
                             write_blender_node_script(
                                 export_path,
