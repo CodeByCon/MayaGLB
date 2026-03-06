@@ -8,12 +8,12 @@ Made because Maya doesn't have a built-in GLB exporter, paid plugins exist but c
 
 ## Install
 
-1. Open Maya and go to the bottom middle of your screen where it says "MEL" and a text input box.
+1. Open Maya and go to the bottom middle of your screen where it says "MEL" and a text input box on the right.
 2. Copy the code below and paste it in.
 3. Press enter.
 
 ```mel
-python("import urllib.request,types; exec(compile(urllib.request.urlopen('https://raw.githubusercontent.com/CodeByCon/ultimate-glb-exporter/main/glb_exporter_v1.py').read(), '<glb>', 'exec'), types.ModuleType('glb').__dict__)");
+python("import urllib.request,types\ntry:\n    exec(compile(urllib.request.urlopen('https://raw.githubusercontent.com/CodeByCon/MayaGLB/main/glb_exporter_v1.py').read(),'<glb>','exec'),types.ModuleType('glb').__dict__);
 ```
 
 Runs the latest version straight from GitHub every time — no files to manage. Save it as a shelf button for one-click access.
