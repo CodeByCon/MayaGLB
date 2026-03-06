@@ -16,12 +16,12 @@ Made because Maya doesn't have a built-in GLB exporter, paid plugins exist but c
 python("import urllib.request as r; exec(compile(r.urlopen('https://raw.githubusercontent.com/CodeByCon/MayaGLB/main/glb_exporter.py').read(),'<glb>','exec'))");
 ```
 
-## Video Tutorial:
-https://youtu.be/VMBnNUz1HIQ
-
 Runs the latest version straight from GitHub every time — no files to manage. Save it as a shelf button for one-click access.
 
 Pillow (the only dependency) is installed automatically on first run to `DRIVE:/MayaGLB/PythonPlugins`. No admin rights required.
+
+## Video Tutorial:
+<iframe width="2545" height="1142" src="https://www.youtube.com/embed/VMBnNUz1HIQ" title="FREE GLB EXPORT TOOL FOR MAYA 2026! [MayaGLB]" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
 
 ---
 
