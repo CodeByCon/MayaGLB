@@ -982,13 +982,7 @@ def build_glb(mesh_list, opts=None):
     for mesh_idx, (mesh_transform, lod_pairs) in enumerate(meshes_with_lod):
         print(f"\n[GLB] ── Processing: {mesh_transform}  ({len(lod_pairs)} LOD levels)")
 
-        if mesh_idx > 0:
-            gltf["meshes"].append({"primitives":[], "extras":{}})
-            new_node = {"mesh": len(gltf["meshes"])-1}
-            gltf["nodes"].append(new_node)
-            gltf["scenes"][0]["nodes"].append(len(gltf["nodes"])-1)
-
-        cur_mesh_idx = mesh_idx
+        cur_mesh_idx = 0
         lod_prim_ranges = {}
 
         for lod_level, lod_transform in lod_pairs:
