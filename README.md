@@ -32,7 +32,7 @@ Pillow (the only dependency) is installed automatically on first run to `DRIVE:/
 - Multi-mesh - merge all into one GLB or batch export one file per object
 - Multi-material - one glTF primitive per face-group
 - PBR materials - reads Arnold / Standard Surface / Lambert shader networks
-- ORM textures - pack O+R+M into one PNG, or keep separate with an auto-generated Blender node-wiring script
+- ORM textures - pack O+R+M into one PNG, or keep AO separate as its own occlusionTexture
 - Skeleton export - joint hierarchy, inverse bind matrices, skin weights
 - Animation - bakes TRS keyframes over the playback range
 - Non-manifold detection - warns and optionally auto-fixes before export
@@ -47,7 +47,6 @@ Pillow (the only dependency) is installed automatically on first run to `DRIVE:/
 - Collision mesh tagging - detects UCX_ / UBX_ / USP_ / UCP_ prefixes and tags them in glTF extras
 - Export presets - save, load and delete named configurations
 - Thumbnail - captures the active viewport and embeds a 256px PNG in the GLB metadata
-- UE Material Instance mode - full PBR data embedded so Unreal auto-creates a Material Instance on import
 - Auto shelf button - installs a dedicated GLB_Exporter shelf on first run, persists across restarts
 - Scale check - reports bounding box dimensions at the current scale multiplier with a sanity warning
 - Y-up - optional Z-to-Y axis swap for engines that use Y-up
