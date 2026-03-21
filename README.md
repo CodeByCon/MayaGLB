@@ -68,5 +68,15 @@ Pillow (the only dependency) is installed automatically on first run to `DRIVE:/
 ---
 
 ## License
+This project, **MayaGLB**, is licensed under the **Apache License 2.0**.
 
- GPL V3 
+You are free to use, modify, and distribute this software, but you **must**:
+- Credit **Connor Henry** as the original author
+- Include a link to this license
+- State if changes were made
+
+For full terms, see the [LICENSE](https://github.com/CodeByCon/MayaGLB/blob/main/LICENSE) file.
+
+### Academic or Media Use
+If you use MayaGLB in research, a publication, or media, please cite:
+> Henry, C. (2026). *MayaGLB: A GLB Exporter for Autodesk Maya*.
