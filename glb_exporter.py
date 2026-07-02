@@ -145,7 +145,6 @@ def _install_shelf_button():
 # ---------------------------------------------------------------------------
 # Settings save / load
 # ---------------------------------------------------------------------------
-# FIX 1: "yup" → True,  "unit_scale" → 0.01
 _SETTINGS_DEFAULTS = {
     # Transform
     "yup":            False,
@@ -1601,6 +1600,9 @@ class UE_Blender_Final_Exporter:
         self._set_status(f"Preset deleted: {val}", (0.5,0.35,0.1))
 
     def _collect_settings(self):
+        # Force changes when any input is put in scale, this fixes issue 1: github.com/CodeByCon/MayaGLB/issues/1
+        try: cmds.setFocus("GLB_RootCol")
+        except Exception: pass
         is_sep    = cmds.radioButton(self.orm_rb2, q=True, sl=True)
         lod_names = [cmds.textFieldButtonGrp(f, q=True, text=True) for f in self.lod_fields]
         return {
