@@ -1,7 +1,11 @@
+"""
+MayaGLB Exporter
+"""
+
 import maya.cmds as cmds
 import maya.api.OpenMaya as om
 import maya.api.OpenMayaAnim as oma
-import os, struct, sys, subprocess, io, json, math, re, threading
+import os, struct, sys, subprocess, io, json, math, re, threading, time
 
 # ---------------------------------------------------------------------------
 # Drive detection + paths
@@ -11,10 +15,11 @@ DEFAULT_EXPORT_DIR = ""
 SETTINGS_DIR       = ""
 SETTINGS_FILE      = ""
 PRESETS_FILE       = ""
+STATE_FILE         = ""
 ACTIVE_DRIVE       = ""
 
 def _setup_paths(drive):
-    global LIB_PATH, DEFAULT_EXPORT_DIR, SETTINGS_DIR, SETTINGS_FILE, PRESETS_FILE, ACTIVE_DRIVE
+    global LIB_PATH, DEFAULT_EXPORT_DIR, SETTINGS_DIR, SETTINGS_FILE, PRESETS_FILE, STATE_FILE, ACTIVE_DRIVE
     drive = drive.rstrip("/\\")
     if not drive.endswith(":"): drive += ":"
     ACTIVE_DRIVE       = drive
@@ -23,6 +28,7 @@ def _setup_paths(drive):
     SETTINGS_DIR       = drive + "/MayaGLB/Settings"
     SETTINGS_FILE      = SETTINGS_DIR + "/exporter_settings.json"
     PRESETS_FILE       = SETTINGS_DIR + "/exporter_presets.json"
+    STATE_FILE         = SETTINGS_DIR + "/exporter_state.json"
     for p in [LIB_PATH, DEFAULT_EXPORT_DIR, SETTINGS_DIR]:
         if not os.path.exists(p):
             try: os.makedirs(p)
@@ -83,64 +89,171 @@ else:
     _show_drive_picker()
 
 # ---------------------------------------------------------------------------
+# Persistent state (install markers, cooldown timers)
+# ---------------------------------------------------------------------------
+_STATE_DEFAULTS = {
+    "shelf_installed":        False,
+    "shelf_install_failed_at": 0,
+    "pillow_last_attempt":    0,
+    "pillow_last_result":     None,   # None = never tried, True/False = last outcome
+}
+
+def _load_state():
+    s = dict(_STATE_DEFAULTS)
+    if not STATE_FILE or not os.path.exists(STATE_FILE): return s
+    try:
+        with open(STATE_FILE, 'r') as f: saved = json.load(f)
+        s.update({k: v for k, v in saved.items() if k in s})
+    except Exception as e:
+        print(f"[GLB] Could not load state: {e}")
+    return s
+
+def _save_state(s):
+    if not STATE_FILE: return
+    try:
+        with open(STATE_FILE, 'w') as f: json.dump(s, f, indent=2)
+    except Exception as e:
+        print(f"[GLB] Could not save state: {e}")
+
+# ---------------------------------------------------------------------------
 # Auto shelf button installer
 # ---------------------------------------------------------------------------
 _GLB_SHELF_NAME = "MayaGLB Exporter"   # dedicated shelf — no ambiguity
 
+def _shelf_button_exists():
+    """Return True only if the shelf AND a valid GLB shelfButton genuinely exist."""
+    try:
+        if not cmds.shelfLayout(_GLB_SHELF_NAME, exists=True):
+            return False
+        for btn in (cmds.shelfLayout(_GLB_SHELF_NAME, q=True, childArray=True) or []):
+            try:
+                if cmds.shelfButton(btn, q=True, exists=True):
+                    lbl = cmds.shelfButton(btn, q=True, label=True) or ""
+                    if "GLB" in lbl:
+                        return True
+            except:
+                continue
+        return False
+    except:
+        return False
+
+def _notify(message, success=True):
+    """Pop a quick heads-up display message in the viewport so the user actually
+    sees what happened, instead of it just scrolling by in the Script Editor."""
+    try:
+        bg = 0x2e7d32 if success else 0x8a2323
+        cmds.inViewMessage(amg=message, pos='midCenterTop', fade=True,
+                           fadeStayTime=2500, dragKill=True, bkc=bg)
+    except Exception:
+        # inViewMessage isn't available in every context (e.g. batch mode) —
+        # console output below still covers us.
+        pass
+
+# The shelf button just re-runs this same file from GitHub so people always
+# get the latest build without having to reinstall by hand.
+_SHELF_CMD = (
+    "python(\"import urllib.request as r; "
+    "exec(compile(r.urlopen("
+    "'https://raw.githubusercontent.com/CodeByCon/MayaGLB/main/glb_exporter.py'"
+    ").read(),'<glb>','exec'))\")"
+)
+
 def _install_shelf_button():
-    cmd_str = (
-        "python(\"import urllib.request as r; "
-        "exec(compile(r.urlopen("
-        "'https://raw.githubusercontent.com/CodeByCon/MayaGLB/main/glb_exporter.py'"
-        ").read(),'<glb>','exec'))\")"
-    )
+    state = _load_state()
 
-    def _do_install():
-        try:
-            import maya.mel as mel
-            top = mel.eval('$tmp = $gShelfTopLevel')
+    # Already installed and verified on disk/UI — nothing to do, don't touch the shelf.
+    if state.get("shelf_installed") and _shelf_button_exists():
+        print("[GLB] Shelf button already installed — skipping.")
+        return
 
-            # Create our shelf if it doesn't exist yet
-            if not cmds.shelfLayout(_GLB_SHELF_NAME, exists=True):
-                cmds.shelfLayout(_GLB_SHELF_NAME, parent=top)
-                print(f"[GLB] Created shelf: {_GLB_SHELF_NAME}")
+    # A previous attempt failed — do NOT auto-retry. Retrying automatically is what
+    # caused the empty-shelf loop; once it fails, it stays failed until the state
+    # file is cleared manually (delete exporter_state.json in the Settings folder).
+    if state.get("shelf_install_failed_at"):
+        print(f"[GLB] Shelf install previously failed — not retrying automatically. "
+              f"Delete {STATE_FILE} to try again.")
+        return
 
-            # Skip if the button already exists on our shelf
-            for btn in (cmds.shelfLayout(_GLB_SHELF_NAME, q=True, childArray=True) or []):
-                try:
-                    if cmds.shelfButton(btn, q=True, exists=True):
-                        lbl = cmds.shelfButton(btn, q=True, label=True) or ""
-                        if "GLB" in lbl:
-                            print(f"[GLB] Shelf button already exists — skipping.")
-                            return
-                except: pass
-
-            cmds.shelfButton(
-                parent=_GLB_SHELF_NAME,
-                label="Export as GLB",
-                annotation="Open Ultimate GLB Exporter v2.0",
-                image="out_mesh.png",
-                imageOverlayLabel="GLB",
-                overlayLabelColor=(0.2, 0.9, 0.4),
-                overlayLabelBackColor=(0, 0, 0, 0.4),
-                style="iconAndTextCentered",
-                command=cmd_str,
-                sourceType="mel",
-            )
-
-            # Write shelf file to disk immediately so it persists across restarts
-            mel.eval('saveAllShelves $gShelfTopLevel')
-            print(f"[GLB] Shelf button installed and saved on '{_GLB_SHELF_NAME}' shelf.")
-
-        except Exception as e:
-            import traceback
-            print(f"[GLB] Shelf button install warning: {e}")
-            traceback.print_exc()
-
+    # Hand off to _do_install on the next idle tick — this used to just stop here
+    # without ever calling _do_install(), which is the whole reason the shelf
+    # button never showed up. evalDeferred also gives Maya's shelf UI a beat to
+    # finish loading before we try to touch it.
     try:
         cmds.evalDeferred(_do_install)
     except Exception as e:
-        print(f"[GLB] Shelf button evalDeferred failed: {e}")
+        print(f"[GLB] Couldn't queue the shelf install: {e}")
+        _notify("GLB shelf install failed to queue — check the Script Editor", success=False)
+
+def _do_install():
+    try:
+        import maya.mel as mel
+        top = mel.eval('$tmp = $gShelfTopLevel')
+        if not top or not cmds.shelfTabLayout(top, exists=True):
+            raise RuntimeError("Shelf UI ($gShelfTopLevel) is not ready yet.")
+
+        if cmds.shelfLayout(_GLB_SHELF_NAME, exists=True) and not _shelf_button_exists():
+            print(f"[GLB] Found stale/incomplete '{_GLB_SHELF_NAME}' shelf — rebuilding.")
+            cmds.deleteUI(_GLB_SHELF_NAME)
+
+        if cmds.shelfLayout(_GLB_SHELF_NAME, exists=True):
+            shelf_name = _GLB_SHELF_NAME
+        else:
+            # Capture whatever name Maya actually assigned, it may not match
+            # _GLB_SHELF_NAME if that name was already taken somewhere in the UI.
+            shelf_name = cmds.shelfLayout(_GLB_SHELF_NAME, parent=top)
+            print(f"[GLB] Created shelf: {shelf_name}")
+            if shelf_name != _GLB_SHELF_NAME:
+                print(f"[GLB] NOTE: requested name '{_GLB_SHELF_NAME}' was taken — "
+                      f"Maya assigned '{shelf_name}' instead.")
+
+        # Make sure Maya actually registered it as a tab, and select it.
+        try:
+            cmds.shelfTabLayout(top, edit=True, selectTab=shelf_name)
+        except Exception as tab_err:
+            print(f"[GLB] Could not select shelf tab: {tab_err}")
+
+        if _shelf_button_exists():
+            print("[GLB] Shelf button already exists — skipping.")
+            s = _load_state(); s["shelf_installed"] = True
+            s["shelf_install_failed_at"] = 0
+            _save_state(s)
+            return
+
+        cmds.setParent(shelf_name)          # use the REAL name, not the constant
+        cmds.shelfButton(
+             label="Export as GLB",
+             annotation="Open Ultimate GLB Exporter v2.1",
+             image="out_mesh.png",
+             imageOverlayLabel="GLB",
+             overlayLabelColor=(0.2, 0.9, 0.4),
+             overlayLabelBackColor=(0, 0, 0, 0.4),
+             style="iconAndTextCentered",
+             command=_SHELF_CMD,
+             sourceType="mel",
+        )
+
+        if not _shelf_button_exists():
+            raise RuntimeError("shelfButton() returned but button could not be verified afterwards.")
+
+        mel.eval('saveAllShelves $gShelfTopLevel')
+        print(f"[GLB] Shelf button installed and saved on '{shelf_name}' shelf.")
+        _notify(f"GLB Exporter added to the '{shelf_name}' shelf", success=True)
+
+        s = _load_state()
+        s["shelf_installed"] = True
+        s["shelf_install_failed_at"] = 0
+        _save_state(s)
+
+    except Exception as e:
+        import traceback
+        print(f"[GLB] Shelf button install FAILED: {e}")
+        traceback.print_exc()
+        print(f"[GLB] Will not auto-retry. Delete {STATE_FILE} to try again after fixing the issue above.")
+        _notify("GLB shelf install failed — see Script Editor for details", success=False)
+        s = _load_state()
+        s["shelf_installed"] = False
+        s["shelf_install_failed_at"] = time.time()
+        _save_state(s)
 
 # ---------------------------------------------------------------------------
 # Settings save / load
@@ -317,50 +430,81 @@ def _cleanup_pip_artifacts(lib_path):
                 print(f"[GLB] Cleanup warning: {e}")
     if removed: print(f"[GLB] Cleaned up: {', '.join(removed)}")
 
+_PILLOW_RETRY_COOLDOWN = 300   # seconds between automatic reinstall attempts after a failure
+
 def ensure_libraries(lib_path):
     if lib_path and lib_path not in sys.path:
         sys.path.insert(0, lib_path)
     try:
         from PIL import Image
         print("[GLB] Pillow already installed — ready.")
+        s = _load_state(); s["pillow_last_result"] = True; _save_state(s)
         return True
     except ImportError:
-        print(f"[GLB] Pillow not found — installing to {lib_path} ...")
+        pass
+
+    # Import failed. Check whether we already tried recently — if so, don't
+    # spawn another mayapy subprocess, just report the cached failure.
+    state = _load_state()
+    last_attempt = state.get("pillow_last_attempt", 0) or 0
+    if (state.get("pillow_last_result") is False and
+            (time.time() - last_attempt) < _PILLOW_RETRY_COOLDOWN):
+        remaining = int(_PILLOW_RETRY_COOLDOWN - (time.time() - last_attempt))
+        print(f"[GLB] Pillow install failed recently — not retrying for {remaining}s "
+              f"(delete {STATE_FILE} to force a retry sooner).")
+        return False
+
+    print(f"[GLB] Pillow not found — installing to {lib_path} ...")
+    state["pillow_last_attempt"] = time.time()
+    _save_state(state)
+
+    try:
+        import maya.mel as mel
+        main_pb = mel.eval('$tmp = $gMainProgressBar')
+        cmds.progressBar(main_pb, edit=True, beginProgress=True,
+                         isInterruptable=False,
+                         status=f'Installing Pillow to {lib_path} ...',
+                         maxValue=100)
+    except: main_pb = None
+    try:
+        _maya_bin  = os.path.dirname(sys.executable)
+        _candidates = [
+            os.path.join(_maya_bin, "mayapy.exe"),
+            os.path.join(_maya_bin, "mayapy"),
+            os.path.join(_maya_bin, "python.exe"),
+            os.path.join(_maya_bin, "python"),
+        ]
+        _python_exe = next((c for c in _candidates if os.path.exists(c)), None)
+        if _python_exe is None:
+            state = _load_state(); state["pillow_last_result"] = False; _save_state(state)
+            return False
+        _sp_kwargs = {}
+        if sys.platform == "win32":
+            _sp_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+
+        result = subprocess.run([_python_exe, "-m", "pip", "install", "--target", lib_path, "Pillow"], capture_output=True, text=True, **_sp_kwargs)
+        state = _load_state()
+        if result.returncode == 0:
+            print("[GLB] Pillow installed!")
+            if lib_path not in sys.path: sys.path.insert(0, lib_path)
+            import importlib; importlib.invalidate_caches()
+            _cleanup_pip_artifacts(lib_path)
+            state["pillow_last_result"] = True
+            _save_state(state)
+            return True
+        else:
+            print(f"[GLB] Pillow install FAILED:\n{result.stderr}")
+            state["pillow_last_result"] = False
+            _save_state(state)
+            return False
+    except Exception as e:
+        print(f"[GLB] Pillow install EXCEPTION: {e}")
+        state = _load_state(); state["pillow_last_result"] = False; _save_state(state)
+        return False
+    finally:
         try:
-            import maya.mel as mel
-            main_pb = mel.eval('$tmp = $gMainProgressBar')
-            cmds.progressBar(main_pb, edit=True, beginProgress=True,
-                             isInterruptable=False,
-                             status=f'Installing Pillow to {lib_path} ...',
-                             maxValue=100)
-        except: main_pb = None
-        try:
-            _maya_bin  = os.path.dirname(sys.executable)
-            _candidates = [
-                os.path.join(_maya_bin, "mayapy.exe"),
-                os.path.join(_maya_bin, "mayapy"),
-                os.path.join(_maya_bin, "python.exe"),
-                os.path.join(_maya_bin, "python"),
-            ]
-            _python_exe = next((c for c in _candidates if os.path.exists(c)), None)
-            if _python_exe is None: return False
-            result = subprocess.run(
-                [_python_exe, "-m", "pip", "install", "--target", lib_path, "Pillow"],
-                capture_output=True, text=True)
-            if result.returncode == 0:
-                print("[GLB] Pillow installed!")
-                if lib_path not in sys.path: sys.path.insert(0, lib_path)
-                import importlib; importlib.invalidate_caches()
-                _cleanup_pip_artifacts(lib_path)
-                return True
-            else:
-                print(f"[GLB] Pillow install FAILED:\n{result.stderr}"); return False
-        except Exception as e:
-            print(f"[GLB] Pillow install EXCEPTION: {e}"); return False
-        finally:
-            try:
-                if main_pb: cmds.progressBar(main_pb, edit=True, endProgress=True)
-            except: pass
+            if main_pb: cmds.progressBar(main_pb, edit=True, endProgress=True)
+        except: pass
 
 # ---------------------------------------------------------------------------
 # GLB packer
@@ -1285,19 +1429,19 @@ def build_glb(mesh_list, opts=None):
 
 
 # ---------------------------------------------------------------------------
-# UI  v2.0
+# UI  v2.1
 # ---------------------------------------------------------------------------
 class UE_Blender_Final_Exporter:
     def __init__(self):
         self.win = "UE_Final_Exporter_Win"
         if cmds.window(self.win, exists=True): cmds.deleteUI(self.win)
-        cmds.window(self.win, title="Ultimate GLB Exporter  v2.0",
+        cmds.window(self.win, title="Ultimate GLB Exporter  v2.1",
                     w=520, sizeable=True, topLeftCorner=[100,100], toolbox=True)
         cmds.scrollLayout("GLB_Scroll", cr=True, hst=0, vst=14, childResizable=True)
         root = cmds.columnLayout("GLB_RootCol", adj=True, rs=0)
 
         cmds.frameLayout(l="", bv=False, mh=6, mw=0, p=root)
-        cmds.text(l="  ULTIMATE GLB EXPORTER  v2.0", fn="boldLabelFont",
+        cmds.text(l="  ULTIMATE GLB EXPORTER  v2.1", fn="boldLabelFont",
                   al="center", h=28, bgc=(0.10, 0.10, 0.16))
         cmds.text(l="  Blender / UE  ·  LOD  ·  Morphs  ·  Multi-UV  ·  Emissive  ·  Collision  ·  Presets",
                   fn="smallPlainLabelFont", al="center", h=18, bgc=(0.10, 0.10, 0.16))
@@ -1433,7 +1577,6 @@ class UE_Blender_Final_Exporter:
         cmds.frameLayout(self.orm_sep_info, e=True, vis=False)
         _end_sub()
 
-        cmds.setdefault = None   # clear accidental leak — harmless sentinel removed below
         cmds.setParent('..'); cmds.setParent('..')  # end settings outer frame
 
         cmds.frameLayout(l="", bv=False, mh=8, mw=10, p=root)
@@ -1460,7 +1603,7 @@ class UE_Blender_Final_Exporter:
             l="  ▸  Credits", cll=True, cl=True, mh=8, mw=10, p=root,
             cc=self._refresh_win, ec=self._refresh_win)
         cmds.columnLayout(adj=True, rs=5)
-        cmds.text(l="  Ultimate GLB Exporter  v2.0",         fn="boldLabelFont",       al="left")
+        cmds.text(l="  Ultimate GLB Exporter  v2.1",         fn="boldLabelFont",       al="left")
         cmds.text(l="  Maya 2026  ·  Python 3  ·  glTF 2.0", fn="smallPlainLabelFont", al="left")
         cmds.separator(h=8, style='in')
         cmds.text(l="  CREDITS",                              fn="boldLabelFont",       al="left")
@@ -1705,13 +1848,14 @@ class UE_Blender_Final_Exporter:
 
     def run_export(self, *args):
         global Image, PILLOW_OK
-        try:
-            PILLOW_OK = ensure_libraries(LIB_PATH)
-            if PILLOW_OK:
-                from PIL import Image as _Image
-                Image = _Image
-        except Exception as e:
-            print(f"[GLB] Pillow check failed: {e}")
+        if not PILLOW_OK:
+            try:
+                PILLOW_OK = ensure_libraries(LIB_PATH)
+                if PILLOW_OK:
+                    from PIL import Image as _Image
+                    Image = _Image
+            except Exception as e:
+                    print(f"[GLB] Pillow check failed: {e}")
 
         sel = cmds.ls(sl=True, type='transform')
         meshes = [o for o in sel if cmds.listRelatives(o, shapes=True, type='mesh')]
