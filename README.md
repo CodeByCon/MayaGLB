@@ -80,3 +80,6 @@ For full terms, see the [LICENSE](https://github.com/CodeByCon/MayaGLB/blob/main
 ### Academic or Media Use
 If you use MayaGLB in research, a publication, or media, please cite:
 > Henry, C. (2026). *MayaGLB: A GLB Exporter for Autodesk Maya*.
+
+> [!NOTE]
+> This repository was re-uploaded, this means all previous issues and stars were removed. Please resubmit. Sorry for any inconveniences (29/07/26)
