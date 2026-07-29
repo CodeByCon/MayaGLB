@@ -23,6 +23,10 @@ Pillow (the only dependency) is installed automatically on first run to `DRIVE:/
 ## Video Tutorial:
 [![MayaGLB Tutorial (V1)](https://img.youtube.com/vi/VMBnNUz1HIQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=VMBnNUz1HIQ)
 
+
+> [!NOTE]
+> If you have any feedback, please open an issue or discussion.
+
 ---
 
 <details>
